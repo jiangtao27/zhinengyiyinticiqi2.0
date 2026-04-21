@@ -99,6 +99,7 @@
             outline: none;
             white-space: pre-wrap;
             text-align: justify;
+            will-change: transform;
         }
         
         /* 编辑模式样式 */
@@ -446,6 +447,9 @@
     let wakeLock = null;
     let audioContext, analyser, microphone, scriptProcessor;
 
+    // 自动模式专用：transform 偏移量（支持亚像素）
+    let autoOffsetY = 0;
+
     // DOM 元素
     const content = document.getElementById('content');
     const container = document.getElementById('scroll-container');
@@ -553,7 +557,6 @@
         speedRange.max = newMax;
         speedRange.step = newStep;
 
-        // 若当前值超出新范围，平滑缩放到新上限
         let currentVal = parseFloat(speedRange.value);
         if (currentVal > newMax) {
             currentVal = newMax;
@@ -564,7 +567,7 @@
         micBtn.innerText = isRunning ? '⏹ 停止' : (isAutoMode ? '▶ 开始播放' : '🎤 开始监听');
     }
 
-    // ========== 自动播放逻辑 ==========
+    // ========== 自动播放逻辑（使用 transform 实现亚像素丝滑滚动） ==========
     function startAuto() {
         isRunning = true;
         micBtn.innerText = "⏹ 停止";
@@ -572,12 +575,18 @@
         statusDot.classList.add('active');
         requestWakeLock();
 
-        function loop() {
+        let lastTime = performance.now();
+
+        function loop(now) {
             if (!isRunning || !isAutoMode) return;
             if (!isPaused) {
+                const dt = (now - lastTime) / 16.667; // 归一化到 60fps 基准
                 const speed = parseFloat(speedRange.value);
-                container.scrollBy(0, speed);
+                // 使用 transform 实现亚像素级丝滑滚动
+                autoOffsetY += speed * dt;
+                content.style.transform = `translateY(${-autoOffsetY}px)`;
             }
+            lastTime = now;
             autoScrollId = requestAnimationFrame(loop);
         }
         autoScrollId = requestAnimationFrame(loop);
@@ -678,6 +687,11 @@
     
     function resetText() {
         container.scrollTo({ top: 0, behavior: 'smooth' });
+        // 自动模式重置时同步清零 transform 偏移
+        if (isAutoMode) {
+            autoOffsetY = 0;
+            content.style.transform = 'translateY(0px)';
+        }
     }
 
     // 4. 暂停/播放控制（对声控和自动模式均生效）
@@ -710,7 +724,6 @@
 
     function handleSpeedDrag(clientY) {
         const newSpeed = getSpeedFromY(clientY);
-        // 根据当前模式量化到对应步进
         const step = isAutoMode ? 0.05 : 0.1;
         const quantized = Math.round(newSpeed / step) * step;
         const finalVal = Math.max(SPEED_MIN, Math.min(getSpeedMax(), quantized));
@@ -755,7 +768,7 @@
         }
     }
 
-    // 7. 声控逻辑（原有功能完全保留）
+    // 7. 声控逻辑（原有功能完全保留，仍使用 scrollBy）
     async function startMic() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
