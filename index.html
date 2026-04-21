@@ -549,12 +549,26 @@
         }
     });
 
-    // ========== 声控 / 自动 模式切换 ==========
+    // ========== 声控 / 自动 模式切换（修复：位置同步，避免跳跃） ==========
     function toggleMode() {
         if (isRunning) {
             if (isAutoMode) stopAuto();
             else stopMic();
         }
+        
+        // 模式切换时同步位置，避免视觉跳跃
+        if (isAutoMode) {
+            // 从自动切回声控：将 transform 偏移同步给原生 scrollTop
+            container.scrollTop = Math.round(autoOffsetY);
+            content.style.transform = '';
+            autoOffsetY = 0;
+        } else {
+            // 从声控切回自动：将原生 scrollTop 读入 transform
+            autoOffsetY = container.scrollTop;
+            content.style.transform = `translateY(${-autoOffsetY}px)`;
+            container.scrollTop = 0;
+        }
+        
         isAutoMode = !isAutoMode;
         modeBtn.innerText = isAutoMode ? '🎤 声控模式' : '🔄 自动模式';
 
@@ -612,7 +626,6 @@
     }
 
     // ========== 自动模式：手动拖拽字幕调整位置（原生滚动体验） ==========
-    // 手指按下：将 transform 偏移同步到原生 scrollTop，浏览器接管惯性滚动
     function handleContentDragStart(clientY) {
         if (!isAutoMode || isEditing || isDraggingContent) return;
         isDraggingContent = true;
@@ -624,12 +637,10 @@
         content.style.transform = 'translateY(0px)';
     }
 
-    // 手指移动：完全交给浏览器原生处理，享受惯性/橡皮筋
     function handleContentDragMove(clientY) {
-        // 浏览器原生滚动接管，无需 JS 计算
+        // 浏览器原生滚动接管，享受惯性/橡皮筋，JS 不干预
     }
 
-    // 手指松开：把原生 scrollTop 读回，恢复 transform 自动滚动
     function handleContentDragEnd() {
         if (!isDraggingContent) return;
         isDraggingContent = false;
