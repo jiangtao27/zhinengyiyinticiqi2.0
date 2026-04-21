@@ -422,6 +422,7 @@
             <button class="btn btn-icon" onclick="resetText()">重置位置</button>
             <button class="btn btn-icon" onclick="toggleTheme()" id="themeBtn">☀️ 白底</button>
             <button class="btn btn-icon" onclick="toggleOrientation()" id="orientBtn">📱 横屏</button>
+            <button class="btn btn-icon" onclick="toggleMode()" id="modeBtn">🔄 自动模式</button>
         </div>
     </div>
 
@@ -440,6 +441,8 @@
     let isPaused = false;
     let isLightMode = false;
     let isLandscapeLocked = false;
+    let isAutoMode = false;
+    let autoScrollId = null;
     let wakeLock = null;
     let audioContext, analyser, microphone, scriptProcessor;
 
@@ -454,6 +457,7 @@
     const editBtn = document.getElementById('editBtn');
     const themeBtn = document.getElementById('themeBtn');
     const orientBtn = document.getElementById('orientBtn');
+    const modeBtn = document.getElementById('modeBtn');
     const speedRange = document.getElementById('speedRange');
     const speedVal = document.getElementById('speedVal');
     const rightControls = document.getElementById('rightControls');
@@ -513,7 +517,6 @@
         }
     }
 
-    // 监听系统方向变化，同步按钮状态
     if (screen.orientation) {
         screen.orientation.addEventListener('change', () => {
             const isLandscape = screen.orientation.type.includes('landscape');
@@ -524,12 +527,54 @@
         });
     }
 
-    // 页面卸载时自动解锁方向
     window.addEventListener('beforeunload', () => {
         if (isLandscapeLocked && screen.orientation) {
             screen.orientation.unlock();
         }
     });
+
+    // ========== 声控 / 自动 模式切换 ==========
+    function toggleMode() {
+        if (isRunning) {
+            if (isAutoMode) stopAuto();
+            else stopMic();
+        }
+        isAutoMode = !isAutoMode;
+        modeBtn.innerText = isAutoMode ? '🎤 声控模式' : '🔄 自动模式';
+        micBtn.innerText = isRunning ? '⏹ 停止' : (isAutoMode ? '▶ 开始播放' : '🎤 开始监听');
+    }
+
+    // ========== 自动播放逻辑 ==========
+    function startAuto() {
+        isRunning = true;
+        micBtn.innerText = "⏹ 停止";
+        micBtn.className = "btn btn-danger";
+        statusDot.classList.add('active');
+        requestWakeLock();
+
+        function loop() {
+            if (!isRunning || !isAutoMode) return;
+            if (!isPaused) {
+                const speed = parseFloat(speedRange.value);
+                container.scrollBy(0, speed);
+            }
+            autoScrollId = requestAnimationFrame(loop);
+        }
+        autoScrollId = requestAnimationFrame(loop);
+    }
+
+    function stopAuto() {
+        isRunning = false;
+        if (autoScrollId) cancelAnimationFrame(autoScrollId);
+        autoScrollId = null;
+        micBtn.innerText = isAutoMode ? '▶ 开始播放' : '🎤 开始监听';
+        micBtn.className = "btn btn-primary";
+        statusDot.classList.remove('active');
+        if (wakeLock) {
+            wakeLock.release();
+            wakeLock = null;
+        }
+    }
 
     // 1. 屏幕常亮 (Wake Lock API)
     async function requestWakeLock() {
@@ -614,7 +659,7 @@
         container.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // 4. 暂停/播放控制
+    // 4. 暂停/播放控制（对声控和自动模式均生效）
     function togglePause() {
         isPaused = !isPaused;
         rightPlayBtn.innerText = isPaused ? '▶' : '⏸';
@@ -671,15 +716,18 @@
         isDraggingSpeed = false;
     });
 
-    // 6. 核心声控逻辑
+    // 6. 核心入口：根据当前模式分发到声控或自动播放
     async function toggleMic() {
         if (isRunning) {
-            stopMic();
+            if (isAutoMode) stopAuto();
+            else stopMic();
         } else {
-            await startMic();
+            if (isAutoMode) startAuto();
+            else await startMic();
         }
     }
 
+    // 7. 声控逻辑（原有功能完全保留）
     async function startMic() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -731,7 +779,7 @@
         if (scriptProcessor) scriptProcessor.disconnect();
         
         isRunning = false;
-        micBtn.innerText = "🎤 开始监听";
+        micBtn.innerText = isAutoMode ? '▶ 开始播放' : '🎤 开始监听';
         micBtn.className = "btn btn-primary";
         statusDot.classList.remove('active');
         
