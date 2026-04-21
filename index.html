@@ -64,6 +64,12 @@
             flex-direction: column;
         }
 
+        /* 自动模式：禁用原生滚动，完全由 JS 控制 */
+        body.auto-mode #scroll-container {
+            overflow-y: hidden;
+            touch-action: none;
+        }
+
         /* 顶部栏 */
         header {
             padding: 10px 15px;
@@ -456,6 +462,12 @@
 
     // 自动模式手动拖拽
     let isDraggingContent = false;
+    let isInertiaScrolling = false;
+    let dragStartY = 0;
+    let dragStartOffset = 0;
+    let dragVelocity = 0;
+    let lastDragY = 0;
+    let lastDragTime = 0;
 
     // DOM 元素
     const content = document.getElementById('content');
@@ -549,21 +561,22 @@
         }
     });
 
-    // ========== 声控 / 自动 模式切换（修复：位置同步，避免跳跃） ==========
+    // ========== 声控 / 自动 模式切换（修复：位置同步 + overflow 切换） ==========
     function toggleMode() {
         if (isRunning) {
             if (isAutoMode) stopAuto();
             else stopMic();
         }
         
-        // 模式切换时同步位置，避免视觉跳跃
         if (isAutoMode) {
-            // 从自动切回声控：将 transform 偏移同步给原生 scrollTop
+            // 从自动切回声控：将 transform 偏移同步给原生 scrollTop，恢复原生滚动
+            document.body.classList.remove('auto-mode');
             container.scrollTop = Math.round(autoOffsetY);
             content.style.transform = '';
             autoOffsetY = 0;
         } else {
-            // 从声控切回自动：将原生 scrollTop 读入 transform
+            // 从声控切回自动：将原生 scrollTop 读入 transform，禁用原生滚动
+            document.body.classList.add('auto-mode');
             autoOffsetY = container.scrollTop;
             content.style.transform = `translateY(${-autoOffsetY}px)`;
             container.scrollTop = 0;
@@ -600,7 +613,7 @@
 
         function loop(now) {
             if (!isRunning || !isAutoMode) return;
-            if (!isPaused && !isDraggingContent) {
+            if (!isPaused && !isDraggingContent && !isInertiaScrolling) {
                 const dt = (now - lastTime) / 16.667; // 归一化到 60fps 基准
                 const speed = parseFloat(speedRange.value);
                 autoOffsetY += speed * dt;
@@ -625,35 +638,59 @@
         }
     }
 
-    // ========== 自动模式：手动拖拽字幕调整位置（原生滚动体验） ==========
+    // ========== 自动模式：纯 JS 拖拽 + 惯性衰减（彻底避免 scrollTop 冲突） ==========
     function handleContentDragStart(clientY) {
-        if (!isAutoMode || isEditing || isDraggingContent) return;
+        if (!isAutoMode || isEditing) return;
         isDraggingContent = true;
-        
-        // 把当前视觉位置转交给浏览器原生滚动
-        const syncOffset = Math.round(autoOffsetY);
-        container.scrollTop = syncOffset;
-        autoOffsetY = syncOffset;
-        content.style.transform = 'translateY(0px)';
+        isInertiaScrolling = false; // 中断惯性
+        dragStartY = clientY;
+        dragStartOffset = autoOffsetY;
+        lastDragY = clientY;
+        lastDragTime = performance.now();
+        dragVelocity = 0;
     }
 
     function handleContentDragMove(clientY) {
-        // 浏览器原生滚动接管，享受惯性/橡皮筋，JS 不干预
+        if (!isAutoMode || !isDraggingContent) return;
+        
+        const now = performance.now();
+        const dt = now - lastDragTime;
+        if (dt > 0) {
+            dragVelocity = (clientY - lastDragY) / dt; // px/ms，正值=手指向下
+        }
+        lastDragTime = now;
+        lastDragY = clientY;
+        
+        const deltaY = dragStartY - clientY; // 手指向上滑为正
+        autoOffsetY = Math.max(0, dragStartOffset + deltaY);
+        content.style.transform = `translateY(${-autoOffsetY}px)`;
     }
 
     function handleContentDragEnd() {
         if (!isDraggingContent) return;
         isDraggingContent = false;
         
-        const newScrollTop = container.scrollTop;
-        autoOffsetY = newScrollTop;
-        
-        // 恢复 transform 驱动，清零 scrollTop 避免双重偏移
-        content.style.transform = `translateY(${-autoOffsetY}px)`;
-        container.scrollTop = 0;
+        // 惯性衰减：松手后继续滑行一段距离
+        if (Math.abs(dragVelocity) > 0.3) {
+            isInertiaScrolling = true;
+            let speed = -dragVelocity * 15; // 转换为 px/帧，方向取反
+            
+            function inertiaStep() {
+                if (!isInertiaScrolling || isDraggingContent) return;
+                speed *= 0.92; // 衰减系数
+                if (Math.abs(speed) < 0.2) {
+                    isInertiaScrolling = false;
+                    return;
+                }
+                autoOffsetY = Math.max(0, autoOffsetY + speed);
+                content.style.transform = `translateY(${-autoOffsetY}px)`;
+                requestAnimationFrame(inertiaStep);
+            }
+            requestAnimationFrame(inertiaStep);
+        }
     }
 
-    // 触摸事件（passive: true 不阻止默认行为，让浏览器原生滚动）
+    // 触摸事件
     container.addEventListener('touchstart', (e) => {
         handleContentDragStart(e.touches[0].clientY);
     }, { passive: true });
@@ -758,10 +795,11 @@
     }
     
     function resetText() {
-        container.scrollTo({ top: 0, behavior: 'smooth' });
         if (isAutoMode) {
             autoOffsetY = 0;
             content.style.transform = 'translateY(0px)';
+        } else {
+            container.scrollTo({ top: 0, behavior: 'smooth' });
         }
     }
 
