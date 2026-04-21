@@ -91,6 +91,10 @@
             scroll-behavior: auto;
             position: relative;
             z-index: 10;
+            cursor: grab;
+        }
+        #scroll-container:active {
+            cursor: grabbing;
         }
         
         #content {
@@ -450,6 +454,11 @@
     // 自动模式专用：transform 偏移量（支持亚像素）
     let autoOffsetY = 0;
 
+    // 自动模式手动拖拽
+    let isDraggingContent = false;
+    let dragStartY = 0;
+    let dragStartOffset = 0;
+
     // DOM 元素
     const content = document.getElementById('content');
     const container = document.getElementById('scroll-container');
@@ -579,10 +588,9 @@
 
         function loop(now) {
             if (!isRunning || !isAutoMode) return;
-            if (!isPaused) {
+            if (!isPaused && !isDraggingContent) {
                 const dt = (now - lastTime) / 16.667; // 归一化到 60fps 基准
                 const speed = parseFloat(speedRange.value);
-                // 使用 transform 实现亚像素级丝滑滚动
                 autoOffsetY += speed * dt;
                 content.style.transform = `translateY(${-autoOffsetY}px)`;
             }
@@ -604,6 +612,49 @@
             wakeLock = null;
         }
     }
+
+    // ========== 自动模式：手动拖拽字幕调整位置 ==========
+    function handleContentDragStart(clientY) {
+        if (!isAutoMode || isEditing) return;
+        isDraggingContent = true;
+        dragStartY = clientY;
+        dragStartOffset = autoOffsetY;
+    }
+
+    function handleContentDragMove(clientY) {
+        if (!isAutoMode || !isDraggingContent) return;
+        const deltaY = dragStartY - clientY; // 手指向上滑，字幕上移
+        autoOffsetY = Math.max(0, dragStartOffset + deltaY);
+        content.style.transform = `translateY(${-autoOffsetY}px)`;
+    }
+
+    function handleContentDragEnd() {
+        isDraggingContent = false;
+    }
+
+    // 触摸事件
+    container.addEventListener('touchstart', (e) => {
+        handleContentDragStart(e.touches[0].clientY);
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (e) => {
+        handleContentDragMove(e.touches[0].clientY);
+    }, { passive: true });
+
+    container.addEventListener('touchend', handleContentDragEnd);
+    container.addEventListener('touchcancel', handleContentDragEnd);
+
+    // 鼠标事件（桌面端调试）
+    container.addEventListener('mousedown', (e) => {
+        handleContentDragStart(e.clientY);
+    });
+
+    container.addEventListener('mousemove', (e) => {
+        handleContentDragMove(e.clientY);
+    });
+
+    container.addEventListener('mouseup', handleContentDragEnd);
+    container.addEventListener('mouseleave', handleContentDragEnd);
 
     // 1. 屏幕常亮 (Wake Lock API)
     async function requestWakeLock() {
@@ -687,7 +738,6 @@
     
     function resetText() {
         container.scrollTo({ top: 0, behavior: 'smooth' });
-        // 自动模式重置时同步清零 transform 偏移
         if (isAutoMode) {
             autoOffsetY = 0;
             content.style.transform = 'translateY(0px)';
