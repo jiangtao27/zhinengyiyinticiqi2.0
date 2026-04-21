@@ -456,8 +456,6 @@
 
     // 自动模式手动拖拽
     let isDraggingContent = false;
-    let dragStartY = 0;
-    let dragStartOffset = 0;
 
     // DOM 元素
     const content = document.getElementById('content');
@@ -613,26 +611,38 @@
         }
     }
 
-    // ========== 自动模式：手动拖拽字幕调整位置 ==========
+    // ========== 自动模式：手动拖拽字幕调整位置（原生滚动体验） ==========
+    // 手指按下：将 transform 偏移同步到原生 scrollTop，浏览器接管惯性滚动
     function handleContentDragStart(clientY) {
-        if (!isAutoMode || isEditing) return;
+        if (!isAutoMode || isEditing || isDraggingContent) return;
         isDraggingContent = true;
-        dragStartY = clientY;
-        dragStartOffset = autoOffsetY;
+        
+        // 把当前视觉位置转交给浏览器原生滚动
+        const syncOffset = Math.round(autoOffsetY);
+        container.scrollTop = syncOffset;
+        autoOffsetY = syncOffset;
+        content.style.transform = 'translateY(0px)';
     }
 
+    // 手指移动：完全交给浏览器原生处理，享受惯性/橡皮筋
     function handleContentDragMove(clientY) {
-        if (!isAutoMode || !isDraggingContent) return;
-        const deltaY = dragStartY - clientY; // 手指向上滑，字幕上移
-        autoOffsetY = Math.max(0, dragStartOffset + deltaY);
-        content.style.transform = `translateY(${-autoOffsetY}px)`;
+        // 浏览器原生滚动接管，无需 JS 计算
     }
 
+    // 手指松开：把原生 scrollTop 读回，恢复 transform 自动滚动
     function handleContentDragEnd() {
+        if (!isDraggingContent) return;
         isDraggingContent = false;
+        
+        const newScrollTop = container.scrollTop;
+        autoOffsetY = newScrollTop;
+        
+        // 恢复 transform 驱动，清零 scrollTop 避免双重偏移
+        content.style.transform = `translateY(${-autoOffsetY}px)`;
+        container.scrollTop = 0;
     }
 
-    // 触摸事件
+    // 触摸事件（passive: true 不阻止默认行为，让浏览器原生滚动）
     container.addEventListener('touchstart', (e) => {
         handleContentDragStart(e.touches[0].clientY);
     }, { passive: true });
