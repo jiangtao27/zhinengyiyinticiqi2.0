@@ -466,9 +466,14 @@
     const speedThumb = document.getElementById('speedThumb');
     const speedTooltip = document.getElementById('speedTooltip');
 
-    // 速度参数
+    // 速度参数（自动模式上限3，声控模式上限20）
     const SPEED_MIN = 0.1;
-    const SPEED_MAX = 20;
+    const SPEED_MAX_MIC = 20;
+    const SPEED_MAX_AUTO = 3;
+
+    function getSpeedMax() {
+        return isAutoMode ? SPEED_MAX_AUTO : SPEED_MAX_MIC;
+    }
 
     // ========== 全屏 API ==========
     async function enterFullscreen() {
@@ -541,6 +546,21 @@
         }
         isAutoMode = !isAutoMode;
         modeBtn.innerText = isAutoMode ? '🎤 声控模式' : '🔄 自动模式';
+
+        // 动态调整速度范围：自动模式 0.1~3（步进0.05），声控模式 0.1~20（步进0.1）
+        const newMax = getSpeedMax();
+        const newStep = isAutoMode ? 0.05 : 0.1;
+        speedRange.max = newMax;
+        speedRange.step = newStep;
+
+        // 若当前值超出新范围，平滑缩放到新上限
+        let currentVal = parseFloat(speedRange.value);
+        if (currentVal > newMax) {
+            currentVal = newMax;
+            speedRange.value = currentVal;
+            updateSpeedUI(currentVal);
+        }
+
         micBtn.innerText = isRunning ? '⏹ 停止' : (isAutoMode ? '▶ 开始播放' : '🎤 开始监听');
     }
 
@@ -626,7 +646,8 @@
 
     function updateSpeedUI(val) {
         const v = parseFloat(val);
-        speedVal.innerText = v.toFixed(1);
+        const decimals = isAutoMode ? 2 : 1;
+        speedVal.innerText = v.toFixed(decimals);
         updateRightThumb(v);
     }
 
@@ -667,10 +688,12 @@
 
     // 5. 右侧极简速度条交互
     function updateRightThumb(val) {
-        const ratio = (val - SPEED_MIN) / (SPEED_MAX - SPEED_MIN);
+        const max = getSpeedMax();
+        const ratio = (val - SPEED_MIN) / (max - SPEED_MIN);
         const percent = Math.max(0, Math.min(100, ratio * 100));
         speedThumb.style.bottom = percent + '%';
-        speedTooltip.innerText = val.toFixed(1);
+        const decimals = isAutoMode ? 2 : 1;
+        speedTooltip.innerText = parseFloat(val).toFixed(decimals);
     }
 
     function getSpeedFromY(clientY) {
@@ -679,15 +702,20 @@
         const relativeY = clientY - rect.top;
         let ratio = 1 - (relativeY / trackHeight);
         ratio = Math.max(0, Math.min(1, ratio));
-        return SPEED_MIN + ratio * (SPEED_MAX - SPEED_MIN);
+        const max = getSpeedMax();
+        return SPEED_MIN + ratio * (max - SPEED_MIN);
     }
 
     let isDraggingSpeed = false;
 
     function handleSpeedDrag(clientY) {
         const newSpeed = getSpeedFromY(clientY);
-        speedRange.value = newSpeed;
-        updateSpeedUI(newSpeed);
+        // 根据当前模式量化到对应步进
+        const step = isAutoMode ? 0.05 : 0.1;
+        const quantized = Math.round(newSpeed / step) * step;
+        const finalVal = Math.max(SPEED_MIN, Math.min(getSpeedMax(), quantized));
+        speedRange.value = finalVal;
+        updateSpeedUI(finalVal);
     }
 
     speedTrack.addEventListener('mousedown', (e) => {
